@@ -866,3 +866,5 @@ export {
   type SecretsLocalEncryptedConfig,
   type ConfigMeta,
 } from "./config-schema.js";
+
+export { isFeatureIlmV2Enabled } from "./feature-flags.js";
