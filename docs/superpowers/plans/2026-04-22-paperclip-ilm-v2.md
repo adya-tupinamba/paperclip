@@ -38,6 +38,12 @@
 | `server/src/routes/budget-reset.ts` | `POST /api/budget/reset` (human-only) |
 | `server/src/routes/ops.ts` | Snapshot + daily-report + WebSocket stream |
 | `server/src/__tests__/ilm-v2-e2e.test.ts` | End-to-end lifecycle test |
+
+> **Schema notes from Phase 1 execution (2026-04-22):**
+> - Issue assignee column is `assignee_agent_id` (not `assignee_id`). All SQL in later phases must use this name.
+> - Run-tracking table is `heartbeat_runs` (not `runs`). All FKs + SELECTs must use this. For the "active run for agent" check, filter `heartbeat_runs` by `agent_id` and the appropriate liveness column. Check the schema at `packages/db/src/schema/heartbeat_runs.ts` for exact column names (`status`, `finishedAt`, etc.).
+> - Claude Code's shell runs as Windows admin — embedded-postgres refuses to start under admin. Migrations and DB-touching smoke tests must be run via `schtasks /CREATE /TN paperclip-pg-<tag> /RU <user> /SC ONCE /RL LIMITED ...` or from a non-elevated shell. Phase 1 used schtasks workaround; later phases should mirror or document the constraint.
+
 | `packages/adapters/codex-local/src/server/parse-usage.ts` | gpt-5.4 stream usage parser |
 | `packages/adapters/codex-local/src/server/parse-usage.test.ts` | Parser tests with real NDJSON captures |
 | `.paperclip/drafts/ILM-v2/CEO/AGENTS.md` | CEO role contract |
@@ -171,7 +177,7 @@ ALTER TABLE issues
   );
 
 CREATE INDEX IF NOT EXISTS issues_lifecycle_idx
-  ON issues(lifecycle_state, assignee_id);
+  ON issues(lifecycle_state, assignee_agent_id);
 
 CREATE TABLE IF NOT EXISTS issue_transitions (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -742,13 +748,13 @@ afterAll(async () => { await teardownTestDb(ctx); });
 
 describe('dispatcherHook', () => {
   it('wakes agent when issue enters implementing and budget ok', async () => {
-    const issueId = await ctx.seedIssue({ lifecycle_state: 'planned', assignee_id: ctx.actors.backend });
+    const issueId = await ctx.seedIssue({ lifecycle_state: 'planned', assignee_agent_id: ctx.actors.backend });
     const wake = vi.fn(async () => ({ runId: 'r1' }));
     await dispatcherHook(ctx.db, { issueId, toState: 'implementing' }, { wake });
     expect(wake).toHaveBeenCalledWith({ agentId: ctx.actors.backend, issueId });
   });
   it('does not wake when budget exceeded', async () => {
-    const issueId = await ctx.seedIssue({ lifecycle_state: 'planned', assignee_id: ctx.actors.backend });
+    const issueId = await ctx.seedIssue({ lifecycle_state: 'planned', assignee_agent_id: ctx.actors.backend });
     await ctx.seedRunCost(ctx.actors.backend, 5.50);
     const wake = vi.fn();
     const r = await dispatcherHook(ctx.db, { issueId, toState: 'implementing' }, { wake });
@@ -757,7 +763,7 @@ describe('dispatcherHook', () => {
     expect(r.reason).toMatch(/per_agent_daily/);
   });
   it('does not wake when agent already has active run', async () => {
-    const issueId = await ctx.seedIssue({ lifecycle_state: 'planned', assignee_id: ctx.actors.backend });
+    const issueId = await ctx.seedIssue({ lifecycle_state: 'planned', assignee_agent_id: ctx.actors.backend });
     await ctx.seedActiveRun(ctx.actors.backend);
     const wake = vi.fn();
     await dispatcherHook(ctx.db, { issueId, toState: 'implementing' }, { wake });
@@ -767,8 +773,8 @@ describe('dispatcherHook', () => {
 
 describe('pullNextForAgent', () => {
   it('returns next planned issue for agent ordered by priority', async () => {
-    const low  = await ctx.seedIssue({ lifecycle_state: 'planned', assignee_id: ctx.actors.backend, priority: 1 });
-    const high = await ctx.seedIssue({ lifecycle_state: 'planned', assignee_id: ctx.actors.backend, priority: 5 });
+    const low  = await ctx.seedIssue({ lifecycle_state: 'planned', assignee_agent_id: ctx.actors.backend, priority: 1 });
+    const high = await ctx.seedIssue({ lifecycle_state: 'planned', assignee_agent_id: ctx.actors.backend, priority: 5 });
     const r = await pullNextForAgent(ctx.db, ctx.actors.backend);
     expect(r?.issueId).toBe(high);
   });
@@ -799,9 +805,9 @@ export async function dispatcherHook(
   if (evt.toState !== 'implementing') return { woken: false };
 
   const q = await db.query(
-    `SELECT assignee_id, repo_id FROM issues WHERE id=$1`, [evt.issueId]);
+    `SELECT assignee_agent_id, repo_id FROM issues WHERE id=$1`, [evt.issueId]);
   if (q.rowCount === 0) return { woken: false, reason: 'issue not found' };
-  const agentId = q.rows[0].assignee_id;
+  const agentId = q.rows[0].assignee_agent_id;
   if (!agentId) return { woken: false, reason: 'no assignee' };
 
   const active = await db.query(
@@ -830,7 +836,7 @@ export async function pullNextForAgent(
 ): Promise<{ issueId: string } | null> {
   const r = await db.query(
     `SELECT id FROM issues
-     WHERE assignee_id=$1 AND lifecycle_state IN ('planned','changes_requested','failed')
+     WHERE assignee_agent_id=$1 AND lifecycle_state IN ('planned','changes_requested','failed')
      ORDER BY priority DESC, created_at ASC LIMIT 1`,
     [agentId]);
   if (r.rowCount === 0) return null;
@@ -1664,7 +1670,7 @@ async function main() {
 
   await tx(issueId, 'spec_d', ceo, { spec_md: '# Spec\nAdd hello.py' });
   await tx(issueId, 'planned', cto, { plan_md: '# Plan\n1. write hello.py\n2. run it' });
-  await DB.query(`UPDATE issues SET assignee_id=$1 WHERE id=$2`, [backend, issueId]);
+  await DB.query(`UPDATE issues SET assignee_agent_id=$1 WHERE id=$2`, [backend, issueId]);
   await tx(issueId, 'implementing', backend);
 
   console.log('Dispatcher should have woken BackendDev. Check ~/.paperclip/instances/default/data/run-logs/ for a new run.');
