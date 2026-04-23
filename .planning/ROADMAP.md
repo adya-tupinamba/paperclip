@@ -28,7 +28,10 @@ Make the overnight orchestrator (`packages/db/orchestrate-e2e.ts`) safe to leave
   2. A new drizzle migration in `packages/db/src/migrations/` declares `cost_events.heartbeat_run_id` with `onDelete: "set null"` (or `"cascade"`) and `pnpm -C packages/db db:migrate` applies cleanly against a fresh embedded Postgres.
   3. Every row inserted into `issues` through the overnight orchestrator (`packages/db/orchestrate-e2e.ts`) has non-null `project_id` AND non-null `identifier` — verified by a SQL assertion after a fresh orchestrator run. No 25-row orphan batch like 2026-04-23.
   4. Orchestrator issue creation goes through `server/src/services/issues.ts::createIssue` (service layer) instead of a raw `sql\`INSERT INTO issues...\`` bypass — grep confirms no `INSERT INTO issues` in `packages/db/orchestrate-e2e.ts`.
-**Plans**: TBD
+**Plans**: 3 plans
+  - [ ] 01-01-PLAN.md — FK onDelete set null on cost_events + reorder companyService.remove + verify pg_constraint (DB-01, wave 1)
+  - [ ] 01-02-PLAN.md — Refactor orchestrate-e2e.ts to use issueService.create, removing raw INSERT INTO issues (DB-02, wave 1)
+  - [ ] 01-03-PLAN.md — Idempotent backfill-issue-metadata.ts promoted from scripts/_fix-orphans.ts (DB-02 support, wave 2)
 
 ### Phase 2: Orchestrator bleed-stopper
 **Goal**: The overnight orchestrator resumes issues from their current `lifecycle_state`, caps retries per failing edge, and halts BEFORE spending past `BUDGET_USD_CAP`.
@@ -78,7 +81,7 @@ Make the overnight orchestrator (`packages/db/orchestrate-e2e.ts`) safe to leave
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Schema & data-integrity foundation | 0/TBD | Not started | — |
+| 1. Schema & data-integrity foundation | 0/3 | Planned | — |
 | 2. Orchestrator bleed-stopper | 0/TBD | Not started | — |
 | 3. API hardening & workspace interpolation | 0/TBD | Not started | — |
 | 4. Test safety net | 0/TBD | Not started | — |
