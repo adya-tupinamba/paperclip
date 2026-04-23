@@ -397,9 +397,23 @@ async function processIssue(issue: { id: string; title: string; description: str
     // we don't pipe no-op work through CTO review. Other failure modes
     // still produce a useful review signal and are worth advancing.
     if (typeof impl.reason === "string" && /exceeded|blocked/i.test(impl.reason)) {
-      // Route to rejected (the `blocked` state requires a blocker_reason
-      // column value we can't set through the transition side_effects).
-      await httpTransition(id, "rejected", CEO_ID, undefined, `budget cap: ${impl.reason}`).catch(() => {});
+      // Route to `failed` — the only valid transition out of `implementing`
+      // besides `review` and `blocked`. `rejected` is NOT reachable directly
+      // from `implementing` per server/src/services/lifecycle-states.ts, and
+      // `blocked` requires a blocker_reason we can't stamp via side_effects.
+      // Log any transition failure explicitly so it's never silenced again.
+      const t = await httpTransition(
+        id,
+        "failed",
+        BACKEND_ID,
+        undefined,
+        `budget cap: ${impl.reason}`,
+      );
+      if (!t.ok) {
+        appendLog(
+          `[BackendDev] cap-block transition to failed rejected by API: ${JSON.stringify(t)}`,
+        );
+      }
       appendLog(`[BackendDev] cap-blocked; parking issue ${id} and moving on`);
       return "failed";
     }
