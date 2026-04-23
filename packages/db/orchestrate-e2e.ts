@@ -23,6 +23,14 @@ import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
+// Service-layer imports (DB-02 / D-03): orchestrator must NOT write directly to the
+// issues table via raw SQL — the service is the atomic path (identifier + counter bump
+// + row insert inside a single transaction).
+// Relative import crosses workspace boundary into server/ — acceptable because this
+// script is already installation-specific (hardcoded paths at line 40-41) and this
+// avoids adding a packages/db → server workspace dep edge.
+import { issueService } from "../../server/src/services/issues.js";
+import { createDb } from "./src/client.js";
 
 // ---------------------------------------------------------------------------
 // Constants (hardcoded to this installation to keep the script self-contained)
@@ -73,6 +81,11 @@ function writeStatus(status: Record<string, unknown>): void {
 }
 
 const sql = postgres(DB_URL, { max: 2 });
+
+// Drizzle Db handle for service-layer calls (DB-02). Reuses the same embedded-postgres URL
+// as the raw `postgres` client above. createDb returns a pooled Db.
+const db = createDb(DB_URL);
+const issueSvc = issueService(db);
 
 async function httpTransition(
   issueId: string,
@@ -387,27 +400,23 @@ async function cloneNextInboxIssue(): Promise<{ id: string; title: string; descr
     LIMIT 1
   `;
   const projectId = proj[0]?.id ?? null;
-  const newId = randomUUID();
-  await sql`
-    INSERT INTO issues (
-      id, company_id, project_id, title, description,
-      lifecycle_state, priority, status,
-      origin_kind, origin_fingerprint,
-      assignee_agent_id
-    )
-    VALUES (
-      ${newId},
-      ${ILM_V2_COMPANY},
-      ${projectId},
-      ${'[E2E real] ' + src.title},
-      ${src.description ?? ''},
-      'inbox', 'medium', 'open',
-      'manual', ${'e2e-real-' + src.id + '-' + newId.slice(0, 8)},
-      ${CEO_ID}
-    )
-  `;
-  appendLog(`[clone] new ILM-v2 issue ${newId} from ILM-v1 ${src.id} ("${src.title.slice(0, 60)}")`);
-  return { id: newId, title: '[E2E real] ' + src.title, description: src.description ?? '' };
+  // Atomic create via service layer (DB-02 / D-03). projectId + identifier + issueCounter
+  // bump all commit inside a single db.transaction inside issueService.create.
+  // lifecycle_state is intentionally omitted: the column defaults to 'inbox' at the DB
+  // level (see migration 0065) and the Drizzle schema does not expose it — so we rely
+  // on the default and leave it to downstream FSM transitions to advance.
+  const created = await issueSvc.create(ILM_V2_COMPANY, {
+    projectId,
+    title: '[E2E real] ' + src.title,
+    description: src.description ?? '',
+    priority: 'medium',
+    status: 'open',
+    originKind: 'manual',
+    originFingerprint: 'e2e-real-' + src.id + '-' + randomUUID().slice(0, 8),
+    assigneeAgentId: CEO_ID,
+  });
+  appendLog(`[clone] new ILM-v2 issue ${created.id} (${created.identifier}) from ILM-v1 ${src.id} ("${src.title.slice(0, 60)}")`);
+  return { id: created.id, title: '[E2E real] ' + src.title, description: src.description ?? '' };
 }
 
 // ---------------------------------------------------------------------------
