@@ -747,7 +747,29 @@ export async function startServer(): Promise<StartedServer> {
         });
     }, config.heartbeatSchedulerIntervalMs);
   }
-  
+
+  // ILM-v2 watchdog — every 5 minutes, kill stale `running` heartbeat_runs
+  // whose started_at is > 20m old, bump retry_count on the associated
+  // issue, and escalate to `failed` after 3 timeouts in `implementing`.
+  if (isFeatureIlmV2Enabled()) {
+    const { registerIlmV2Watchdog } = await import("./services/watchdog.js");
+    const { buildQueryDb, buildLifecycleDb } = await import(
+      "./services/ilm-v2-db-adapter.js"
+    );
+    const qdb = buildQueryDb(db as any);
+    const ldb = buildLifecycleDb(db as any);
+    registerIlmV2Watchdog(qdb, ldb, {
+      onTick: (result) => {
+        if (result.killed > 0) {
+          logger.warn({ ...result }, "ilm-v2 watchdog tick killed stale runs");
+        }
+      },
+      onError: (err) => {
+        logger.error({ err }, "ilm-v2 watchdog tick failed");
+      },
+    });
+  }
+
   if (config.databaseBackupEnabled) {
     const backupIntervalMs = config.databaseBackupIntervalMinutes * 60 * 1000;
 
