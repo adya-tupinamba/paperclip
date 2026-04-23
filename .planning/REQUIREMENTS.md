@@ -11,7 +11,7 @@
 ### Database / Schema (DB)
 
 - [x] **DB-01**: DELETE `/api/companies/:id` succeeds for companies with prior heartbeat runs — `cost_events.heartbeat_run_id` FK is redeclared with `onDelete: "set null"` (or `"cascade"`) in `packages/db/src/schema/cost_events.ts`, a drizzle migration is generated and applied, and the DELETE handler explicitly prunes `cost_events` rows first as a belt-and-braces check. **Complete 2026-04-23 via plan 01-01 (commits 19b12a0d, d0079a1c, ddfa9a02); see `.planning/phases/01-schema-data-integrity-foundation/01-01-SUMMARY.md`.**
-- [x] **DB-02**: Issue creation is atomic — every INSERT into `issues` populates `project_id` and `identifier` in the same transaction that increments `companies.issue_counter`. The overnight orchestrator's issue-creation path uses the same service (`server/src/services/issues.ts:1862`) as the API, not direct SQL bypasses. **Complete 2026-04-23 via plan 01-02 (commits dc95f793, aed28e64); see `.planning/phases/01-schema-data-integrity-foundation/01-02-SUMMARY.md`. Note: plan 01-03 promotes the one-off `_fix-orphans.ts` into a reusable `backfill-issue-metadata.ts` as support tooling, but DB-02's core requirement (service-layer path on new creates) is satisfied by 01-02.**
+- [x] **DB-02**: Issue creation is atomic — every INSERT into `issues` populates `project_id` and `identifier` in the same transaction that increments `companies.issue_counter`. The overnight orchestrator's issue-creation path uses the same service (`server/src/services/issues.ts:1862`) as the API, not direct SQL bypasses. **Complete 2026-04-23 via plan 01-02 (commits dc95f793, aed28e64); see `.planning/phases/01-schema-data-integrity-foundation/01-02-SUMMARY.md`. Support tooling delivered by plan 01-03 (commits aca28fb1, b5ab727b): `scripts/backfill-issue-metadata.ts` — idempotent, dry-run-capable one-time cleanup tool, counter-stability proven 43→43→43; see `.planning/phases/01-schema-data-integrity-foundation/01-03-SUMMARY.md`.**
 
 ### Execution Workspace (EXEC)
 
@@ -58,7 +58,7 @@ Every v1.0 requirement is mapped to exactly one phase. Phases are derived in `.p
 | Requirement | Phase | Status |
 |-------------|-------|--------|
 | DB-01 | Phase 1 — Schema & data-integrity foundation | complete (plan 01-01, 2026-04-23) |
-| DB-02 | Phase 1 — Schema & data-integrity foundation | complete (plan 01-02, 2026-04-23) |
+| DB-02 | Phase 1 — Schema & data-integrity foundation | complete (plans 01-02 + 01-03, 2026-04-23) |
 | ORCH-01 | Phase 2 — Orchestrator bleed-stopper | pending |
 | ORCH-02 | Phase 2 — Orchestrator bleed-stopper | pending |
 | ORCH-03 | Phase 2 — Orchestrator bleed-stopper | pending |

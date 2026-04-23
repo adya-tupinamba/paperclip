@@ -1,26 +1,26 @@
 # STATE — Paperclip v1.0 (overnight reliability)
 
-**Last updated:** 2026-04-23 (plan 01-02 complete)
+**Last updated:** 2026-04-23 (plan 01-03 complete — Phase 1 DONE 3/3)
 
 ## Project Reference
 
 - **Project:** Paperclip — self-hosted AI agent orchestration platform for ILM ops
 - **Milestone:** v1.0 — Fix paperclip v2 bugs (overnight reliability)
 - **Core value:** The overnight orchestrator (`packages/db/orchestrate-e2e.ts`) must reliably drive issues through the 11-state lifecycle without infinite-looping, silently burning budget, or corrupting metadata.
-- **Current focus:** Phase 1 — Schema & data-integrity foundation (not started).
+- **Current focus:** Phase 1 complete — transitioning to Phase 2 (orchestrator bleed-stopper).
 
 ## Current Position
 
-- **Phase:** 1 of 5 — Schema & data-integrity foundation
-- **Plan:** 01-02 complete; 01-03 next (DB-02 idempotent backfill script, wave 2)
-- **Status:** In progress (2/3 plans complete in Phase 1)
-- **Overall progress:** `[░░░░░░░░░░] 0/5 phases complete`
+- **Phase:** 1 of 5 — Schema & data-integrity foundation — **COMPLETE (3/3 plans)**
+- **Plan:** 01-03 complete; next is Phase 2 (ORCH-01/02/03, plans TBD)
+- **Status:** Phase 1 done; awaiting Phase 2 kickoff via `/gsd-transition` or `/gsd-plan-phase 2`
+- **Overall progress:** `[██░░░░░░░░] 1/5 phases complete`
 - **Requirements progress:** `[██░░░░░░░░░] 2/11 requirements complete`
 
 ## Performance Metrics
 
-- **Phases completed:** 0/5
-- **Requirements completed:** 2/11 (DB-01 ✓, DB-02 ✓)
+- **Phases completed:** 1/5
+- **Requirements completed:** 2/11 (DB-01 ✓, DB-02 ✓ — both fully shipped: 01-02 primary path + 01-03 backfill tooling)
 - **Tests added (this milestone):** 0 (baseline: 186 Vitest tests on `ilm-v2-reformulation`; note: counts have drifted — current server workspace is 1046 tests across 193 files)
 - **Migrations added (this milestone):** 1 (0066_cost_events_heartbeat_run_set_null.sql) — latest baseline now `0066`, count 67
 - **Incidents resolved:** 2026-04-23 overnight run ($38 bled, 25+ orphan issues, soft-deleted legacy company) — tracked as root causes for this milestone.
@@ -31,6 +31,7 @@
 |------|----------|-------|---------------|------------|---------|
 | 01-01 | ~90 min | 3/3 | 9 | 1 | DB-01 complete — FK set null schema+DB, handler reorder, seed-fallback DELETE=200 |
 | 01-02 | ~22 min | 3/3 | 2 | 0 | DB-02 complete — cloneNextInboxIssue routes through issueService.create; verifier exits ok:true with delta=1, non-null projectId+identifier |
+| 01-03 | ~18 min | 2/2 | 2 | 0 | DB-02 backfill tool — scripts/backfill-issue-metadata.ts idempotent + --dry-run; counter-stable 43→43→43 across apply + re-run; 0 orphans remaining. Phase 1 DONE. |
 
 ## Accumulated Context
 
@@ -61,8 +62,9 @@
 
 - [x] Phase 1: Write drizzle migration for `cost_events.heartbeat_run_id onDelete` (DB-01) — done in plan 01-01 (commit 19b12a0d + ddfa9a02).
 - [x] Phase 1: Replace raw `sql\`INSERT INTO issues...\`` in `packages/db/orchestrate-e2e.ts:391-408` with `createIssue` service call (DB-02) — done in plan 01-02 (commit dc95f793 + aed28e64).
-- [ ] Phase 1: Idempotent backfill script `scripts/backfill-issue-metadata.ts` promoted from `scripts/_fix-orphans.ts` (DB-02 support) — plan 01-03, wave 2.
-- [ ] Phase 1 (deferred): Full `companyService.remove` FK-chain audit — reorder goals/projects, add document_revisions prune. See `.planning/phases/01-schema-data-integrity-foundation/deferred-items.md`.
+- [x] Phase 1: Idempotent backfill script `scripts/backfill-issue-metadata.ts` promoted from `scripts/_fix-orphans.ts` (DB-02 support) — done in plan 01-03 (commits aca28fb1 + b5ab727b).
+- [ ] Phase 1 (deferred): Full `companyService.remove` FK-chain audit — reorder goals/projects, add document_revisions prune. See `.planning/phases/01-schema-data-integrity-foundation/deferred-items.md`. Carried forward to Phase 4 TEST-02 or a Phase 1 bonus.
+- [ ] Phase 1 (optional cleanup): Delete 2 `verify-p01-02-*` noise rows left by the 01-02 dry-stub verifier — counter auto-corrects on next real orchestrator call.
 - [ ] Phase 2: Refactor `processIssue` into an explicit FSM `stepFrom(state, issue)` (ORCH-01, sets up TEST-02).
 - [ ] Phase 3: Add Zod entry-point validation on 4 routes that currently 500 on malformed bodies (API-01).
 - [ ] Phase 4: Create `packages/adapters/pi-local/src/server/execute.test.ts` + `packages/adapters/codex-local/src/server/codex-home.test.ts` (TEST-01).
@@ -82,6 +84,7 @@
 
 ### Last Session
 
+- **2026-04-23 (late evening):** Executed plan 01-03 (DB-02 backfill tooling). 2 tasks, 2 commits (aca28fb1, b5ab727b). `scripts/backfill-issue-metadata.ts` promoted from `scripts/_fix-orphans.ts`: header doc (Usage/Env/Idempotency/Reversibility), `--dry-run` flag, name-based project lookup (no stale UUID), belt-and-braces `AND identifier IS NULL` inner-UPDATE guard, structured JSON report. Idempotency proven empirically: counter probe captured 43 → 43 → 43 across apply + re-run (Δ=0, no double-increment). Final orphan count = 0. Phase 1 now 3/3 complete — both DB-01 and DB-02 fully shipped.
 - **2026-04-23 (evening):** Executed plan 01-02 (DB-02). 3 tasks, 2 commits (dc95f793, aed28e64). `packages/db/orchestrate-e2e.ts::cloneNextInboxIssue` now calls `issueService(db).create(...)` instead of raw SQL INSERT. Server + db typechecks green. ILM-v2 vitest regression floor 21/21 green. Dry-stub verifier `scripts/_verify-orchestrator-create-path.ts` exits 0 with `{ok: true, delta: 1, identifier: "ILV2-42"}`. Discovered that `lifecycleState` is not in the Drizzle schema (raw-migration-only column) and dropped it from the service call — DB default preserves the behavior. Also noted that `pnpm --filter @paperclipai/server test:run` script does not exist; used direct `pnpm exec vitest run` per workspace.
 - **2026-04-23 (afternoon):** Executed plan 01-01 (DB-01). 3 tasks, 3 commits (19b12a0d, d0079a1c, ddfa9a02). Schema FK set null applied, migration 0066 applied live, pg_constraint verified, seed-fallback end-to-end DELETE reproduction exited 0 with HTTP_STATUS_EQUIVALENT=200. Discovered two pre-existing handler bugs (goals/projects order, missing document_revisions prune) and deferred them to `.planning/phases/01-schema-data-integrity-foundation/deferred-items.md` since they're outside DB-01 scope.
 - **2026-04-23 (morning):** Initial GSD setup. Ran `/gsd-map-codebase` → produced `.planning/codebase/` (7 docs, 2097 lines). Ran `/gsd-new-project` → PROJECT.md + REQUIREMENTS.md authored. Roadmap created and Phase 1 planned.
@@ -89,10 +92,12 @@
 
 ### Next Session — Start Here
 
-1. Execute plan 01-03 (DB-02 support) — idempotent `scripts/backfill-issue-metadata.ts` promoted from `scripts/_fix-orphans.ts`. Wave 2.
-2. After 01-03 lands, Phase 1 is complete — transition to Phase 2 (orchestrator bleed-stopper, ORCH-01/02/03).
-3. Optional: clean up the 2 `verify-p01-02-*` noise rows via `DELETE FROM issues WHERE origin_fingerprint LIKE 'verify-p01-02-%';` (counter self-corrects on next real orchestrator call).
-4. Review deferred items for a potential Phase 1 bonus plan: FK-chain audit of `companyService.remove`.
+1. Phase 1 is COMPLETE (3/3 plans, DB-01 + DB-02 shipped). Run `/gsd-transition` to close out Phase 1 and kick off Phase 2 planning (orchestrator bleed-stopper — ORCH-01/02/03), OR run `/gsd-plan-phase 2` directly.
+2. Phase 2 opens with ORCH-01 (resume respects `lifecycle_state`) as the foundational plan; ORCH-02 and ORCH-03 build on the FSM entry point ORCH-01 introduces.
+3. Optional cleanups (low priority):
+   - `DELETE FROM issues WHERE origin_fingerprint LIKE 'verify-p01-02-%';` — 2 noise rows from 01-02's dry-stub verifier (counter auto-corrects on next real orchestrator call).
+   - Phase 1 bonus plan: FK-chain audit of `companyService.remove` (goals/projects order + document_revisions prune) — see `.planning/phases/01-schema-data-integrity-foundation/deferred-items.md`.
+4. Risk to watch before Phase 2: until ORCH-03's budget circuit breaker lands, do NOT re-run `packages/db/orchestrate-e2e.ts` against real Claude Opus without manually checking `spend_today` — the $38 bleed can recur.
 
 ### Open Questions
 
@@ -102,7 +107,7 @@
 
 | Phase | Name | Status | Requirements | Plans |
 |-------|------|--------|--------------|-------|
-| 1 | Schema & data-integrity foundation | In progress (2/3 plans) | DB-01 ✓, DB-02 ✓ | 01-01 done, 01-02 done, 01-03 next (wave 2) |
+| 1 | Schema & data-integrity foundation | **Complete (3/3 plans)** | DB-01 ✓, DB-02 ✓ | 01-01 ✓, 01-02 ✓, 01-03 ✓ |
 | 2 | Orchestrator bleed-stopper | Not started | ORCH-01, ORCH-02, ORCH-03 | TBD |
 | 3 | API hardening & workspace interpolation | Not started | API-01, API-02, EXEC-01 | TBD |
 | 4 | Test safety net | Not started | TEST-01, TEST-02 | TBD |

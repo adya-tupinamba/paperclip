@@ -11,7 +11,7 @@ Make the overnight orchestrator (`packages/db/orchestrate-e2e.ts`) safe to leave
 
 ## Phases
 
-- [ ] **Phase 1: Schema & data-integrity foundation** — Fix FK cascade on `cost_events`, make issue creation atomic; unblock hard-delete testing and eliminate orphan rows.
+- [x] **Phase 1: Schema & data-integrity foundation** — Fix FK cascade on `cost_events`, make issue creation atomic; unblock hard-delete testing and eliminate orphan rows. **Complete 2026-04-23 (3/3 plans).**
 - [ ] **Phase 2: Orchestrator bleed-stopper** — State-machine resume, per-edge retry cap, pre-invocation budget circuit breaker. Stops the overnight money leak.
 - [ ] **Phase 3: API hardening & workspace interpolation** — Zod validation at route entry, wrapped worktree side-effects, template interpolation for `${issueId}`. 500s become 422/201-with-warning.
 - [ ] **Phase 4: Test safety net for Windows patches & orchestrator resume** — Companion Vitest suites + CI guard so the fixes from phases 2–3 don't silently regress on refactors.
@@ -31,7 +31,7 @@ Make the overnight orchestrator (`packages/db/orchestrate-e2e.ts`) safe to leave
 **Plans**: 3 plans
   - [x] 01-01-PLAN.md — FK onDelete set null on cost_events + reorder companyService.remove + verify pg_constraint (DB-01, wave 1) — **complete 2026-04-23**, see `01-01-SUMMARY.md`
   - [x] 01-02-PLAN.md — Refactor orchestrate-e2e.ts to use issueService.create, removing raw INSERT INTO issues (DB-02, wave 1) — **complete 2026-04-23**, see `01-02-SUMMARY.md`
-  - [ ] 01-03-PLAN.md — Idempotent backfill-issue-metadata.ts promoted from scripts/_fix-orphans.ts (DB-02 support, wave 2)
+  - [x] 01-03-PLAN.md — Idempotent backfill-issue-metadata.ts promoted from scripts/_fix-orphans.ts (DB-02 support, wave 2) — **complete 2026-04-23**, see `01-03-SUMMARY.md`
 
 ### Phase 2: Orchestrator bleed-stopper
 **Goal**: The overnight orchestrator resumes issues from their current `lifecycle_state`, caps retries per failing edge, and halts BEFORE spending past `BUDGET_USD_CAP`.
@@ -81,7 +81,7 @@ Make the overnight orchestrator (`packages/db/orchestrate-e2e.ts`) safe to leave
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Schema & data-integrity foundation | 2/3 | In progress | 01-01, 01-02 on 2026-04-23 |
+| 1. Schema & data-integrity foundation | 3/3 | Complete | 01-01, 01-02, 01-03 on 2026-04-23 |
 | 2. Orchestrator bleed-stopper | 0/TBD | Not started | — |
 | 3. API hardening & workspace interpolation | 0/TBD | Not started | — |
 | 4. Test safety net | 0/TBD | Not started | — |
@@ -127,4 +127,4 @@ All 11 v1.0 requirements mapped, no orphans, no duplicates:
 - **Existing tests:** 186 Vitest tests in `server/src/__tests__/` + co-located ILM-v2 service tests in `server/src/services/*.test.ts`
 
 ---
-*Last updated: 2026-04-23 at roadmap creation*
+*Last updated: 2026-04-23 (Phase 1 complete — DB-01 + DB-02 shipped via plans 01-01, 01-02, 01-03)*
