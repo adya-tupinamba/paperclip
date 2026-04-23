@@ -40,6 +40,7 @@ import { accessRoutes } from "./routes/access.js";
 import { issuesTransitionRoutes } from "./routes/issues-transition.js";
 import { agentsPullNextRoutes } from "./routes/agents-pull-next.js";
 import { budgetResetRoutes } from "./routes/budget-reset.js";
+import { opsRoutes } from "./routes/ops.js";
 import { pluginRoutes } from "./routes/plugins.js";
 import { adapterRoutes } from "./routes/adapters.js";
 import { pluginUiStaticRoutes } from "./routes/plugin-ui-static.js";
@@ -289,6 +290,7 @@ export async function createApp(
     api.use("/issues", issuesTransitionRoutes(db));
     api.use("/agents", agentsPullNextRoutes(db));
     api.use("/budget", budgetResetRoutes(db));
+    api.use("/ops", opsRoutes(db));
   }
   app.use("/api", api);
   app.use("/api", (_req, res) => {
