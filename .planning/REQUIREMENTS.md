@@ -53,18 +53,20 @@
 
 ## Traceability
 
-*(Roadmap phase mapping will be filled in by `/gsd-new-project` roadmapper step.)*
+Every v1.0 requirement is mapped to exactly one phase. Phases are derived in `.planning/ROADMAP.md`.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| ORCH-01 | — | pending |
-| ORCH-02 | — | pending |
-| ORCH-03 | — | pending |
-| DB-01 | — | pending |
-| DB-02 | — | pending |
-| EXEC-01 | — | pending |
-| API-01 | — | pending |
-| API-02 | — | pending |
-| TEST-01 | — | pending |
-| TEST-02 | — | pending |
-| OPS-01 | — | pending |
+| DB-01 | Phase 1 — Schema & data-integrity foundation | pending |
+| DB-02 | Phase 1 — Schema & data-integrity foundation | pending |
+| ORCH-01 | Phase 2 — Orchestrator bleed-stopper | pending |
+| ORCH-02 | Phase 2 — Orchestrator bleed-stopper | pending |
+| ORCH-03 | Phase 2 — Orchestrator bleed-stopper | pending |
+| API-01 | Phase 3 — API hardening & workspace interpolation | pending |
+| API-02 | Phase 3 — API hardening & workspace interpolation | pending |
+| EXEC-01 | Phase 3 — API hardening & workspace interpolation | pending |
+| TEST-01 | Phase 4 — Test safety net | pending |
+| TEST-02 | Phase 4 — Test safety net | pending |
+| OPS-01 | Phase 5 — Operator recovery playbook | pending |
+
+**Coverage:** 11/11 requirements mapped ✓
