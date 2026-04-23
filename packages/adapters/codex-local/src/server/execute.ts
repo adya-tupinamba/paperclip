@@ -27,6 +27,8 @@ import {
   isCodexTransientUpstreamError,
   isCodexUnknownSessionError,
 } from "./parse.js";
+import { parseUsageFromStream } from "./parse-usage.js";
+import { computeCost, type ModelId } from "@paperclipai/shared/pricing";
 import { pathExists, prepareManagedCodexHome, resolveManagedCodexHomeDir, resolveSharedCodexHomeDir } from "./codex-home.js";
 import { resolveCodexDesiredSkillNames } from "./skills.js";
 import { buildCodexExecArgs } from "./codex-args.js";
@@ -667,6 +669,25 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
       stderrLine ||
       `Codex exited with code ${attempt.proc.exitCode ?? -1}`;
 
+    // Cost fallback: Codex gpt-5.4 runs don't emit a cost field in the
+    // stream, so derive it from the parsed usage + the static pricing table.
+    // Prefer the parsed usage (Codex `turn.completed`) but fall back to a
+    // generic scan of the raw stdout for OpenAI-style `usage` blocks.
+    const streamUsage = parseUsageFromStream(attempt.proc.stdout);
+    const totalInput = attempt.parsed.usage.inputTokens || streamUsage.input;
+    const totalOutput = attempt.parsed.usage.outputTokens || streamUsage.output;
+    const totalCached = attempt.parsed.usage.cachedInputTokens || streamUsage.cached;
+    const resolvedModelId = (model || streamUsage.model || "gpt-5.4") as ModelId;
+    const derivedCost =
+      totalInput > 0 || totalOutput > 0
+        ? computeCost(resolvedModelId, {
+            input: totalInput,
+            output: totalOutput,
+            cached: totalCached,
+          })
+        : 0;
+    const costUsd = derivedCost > 0 ? derivedCost : null;
+
     return {
       exitCode: attempt.proc.exitCode,
       signal: attempt.proc.signal,
@@ -692,7 +713,7 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
       biller: resolveCodexBiller(effectiveEnv, billingType),
       model,
       billingType,
-      costUsd: null,
+      costUsd,
       resultJson: {
         stdout: attempt.proc.stdout,
         stderr: attempt.proc.stderr,

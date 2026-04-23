@@ -868,3 +868,6 @@ export {
 } from "./config-schema.js";
 
 export { isFeatureIlmV2Enabled } from "./feature-flags.js";
+export { isValidTransition, allowedNext, LIFECYCLE_STATES, type LifecycleState } from "./lifecycle-states.js";
+
+export { COSTS_PER_MODEL, computeCost, type ModelId } from "./pricing.js";
