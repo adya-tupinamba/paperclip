@@ -35,17 +35,22 @@ PAPERCLIP_FEATURE_ILM_V2=true pnpm dev:server
 ```
 
 ```bash
-# Terminal 2: apply seed
-psql "postgres://paperclip:paperclip@127.0.0.1:54329/paperclip" \
-     -f scripts/seed-ilm-v2.sql
+# Terminal 2: apply seed via the tsx helper (works without psql installed)
+pnpm --filter @paperclipai/db exec tsx ../../scripts/ilm-v2-seed.ts
 ```
 
-The seed prints `NOTICE` lines with the freshly-generated UUIDs:
+The helper cleans any stale ILM-v2 rows, runs the seed, and prints the UUIDs
+in ready-to-export form:
 
 ```
-NOTICE:  Company ILM-v2 seeded: id=abc123...
-NOTICE:  Agents: CEO=... CTO=... BackendDev=...
+ILM_V2_COMPANY_ID=<uuid>
+ILM_V2_CEO_ID=<uuid>
+ILM_V2_CTO_ID=<uuid>
+ILM_V2_BACKEND_ID=<uuid>
 ```
+
+(If you have `psql` installed, `psql <url> -f scripts/seed-ilm-v2.sql` also
+works and emits the same UUIDs via `RAISE NOTICE`.)
 
 ### 2. Capture the UUIDs
 
@@ -70,8 +75,12 @@ export ILM_V2_BACKEND_ID=<backend-uuid>
 ## Running the smoke
 
 ```bash
-pnpm tsx scripts/ilm-v2-smoke.ts
+pnpm --filter @paperclipai/db exec tsx ../../scripts/ilm-v2-smoke.ts
 ```
+
+The `--filter @paperclipai/db` prefix is required because the `postgres`
+package (postgres.js) is only hoisted under `packages/db/node_modules/`, so
+tsx must resolve the import from that workspace.
 
 Expected output: three `HTTP 200` transition responses, and the last one
 contains a `dispatch` object. The dispatcher result depends on the env:

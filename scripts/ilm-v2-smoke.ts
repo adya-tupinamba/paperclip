@@ -91,10 +91,21 @@ async function main() {
     console.log(`[smoke] API=${API}`);
 
     // 1. Insert the synthetic issue directly (bypasses ordinary creation flow).
+    //    `issues` requires: origin_kind/origin_fingerprint (NOT NULL), status (NOT NULL),
+    //    `description` (not `body`), and priority is text ('critical'|'high'|'medium'|'low').
     await sql`
-      INSERT INTO issues (id, company_id, title, body, lifecycle_state, priority)
-      VALUES (${issueId}, ${COMPANY_ID}, 'SMOKE: print hello',
-              'add hello.py that prints hi', 'inbox', 5)
+      INSERT INTO issues (
+        id, company_id, title, description,
+        lifecycle_state, priority, status,
+        origin_kind, origin_fingerprint
+      )
+      VALUES (
+        ${issueId}, ${COMPANY_ID},
+        'SMOKE: print hello',
+        'add hello.py that prints hi',
+        'inbox', 'medium', 'open',
+        'manual', ${'smoke-' + issueId}
+      )
     `;
     console.log(`[smoke] inserted issue id=${issueId} state=inbox`);
 
