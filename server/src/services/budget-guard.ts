@@ -23,11 +23,23 @@
  * they use.
  */
 
+// Caps read from env so overnight operation can raise them via the instance
+// .env without a code change. Defaults mirror the original conservative
+// design. For autonomous overnight runs the orchestrator's own budget cap is
+// the outer safety net; these tiers exist to bound single-issue and
+// single-agent runaway spending on top of that.
+function envNum(key: string, fallback: number): number {
+  const raw = process.env[key];
+  if (!raw) return fallback;
+  const n = Number(raw);
+  return Number.isFinite(n) && n > 0 ? n : fallback;
+}
+
 export const CAPS = {
-  per_agent_daily: 5.00,
-  per_agent_hourly: 1.00,
-  per_issue_total: 2.00,
-  global_daily: 15.00,
+  per_agent_daily: envNum("PAPERCLIP_CAP_PER_AGENT_DAILY", 5.0),
+  per_agent_hourly: envNum("PAPERCLIP_CAP_PER_AGENT_HOURLY", 1.0),
+  per_issue_total: envNum("PAPERCLIP_CAP_PER_ISSUE_TOTAL", 2.0),
+  global_daily: envNum("PAPERCLIP_CAP_GLOBAL_DAILY", 15.0),
 } as const;
 
 export type BudgetResult = { ok: true } | { ok: false; reason: string };

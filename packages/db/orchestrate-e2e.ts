@@ -393,7 +393,16 @@ async function processIssue(issue: { id: string; title: string; description: str
   const impl = await backendImplementAndWait(id);
   if (!impl.success) {
     appendLog(`[BackendDev] did not complete: ${impl.reason}`);
-    // Advance to review anyway so CTO can pronounce — but gather handoff first
+    // If the dispatcher blocked on a budget cap, abandon this issue so
+    // we don't pipe no-op work through CTO review. Other failure modes
+    // still produce a useful review signal and are worth advancing.
+    if (typeof impl.reason === "string" && /exceeded|blocked/i.test(impl.reason)) {
+      // Route to rejected (the `blocked` state requires a blocker_reason
+      // column value we can't set through the transition side_effects).
+      await httpTransition(id, "rejected", CEO_ID, undefined, `budget cap: ${impl.reason}`).catch(() => {});
+      appendLog(`[BackendDev] cap-blocked; parking issue ${id} and moving on`);
+      return "failed";
+    }
   }
 
   // BackendDev needs a handoff to leave 'implementing'. Synthesize one here
