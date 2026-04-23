@@ -42,15 +42,37 @@ async function ensureParentDir(target: string): Promise<void> {
   await fs.mkdir(path.dirname(target), { recursive: true });
 }
 
+async function trySymlink(target: string, source: string): Promise<"linked" | "failed"> {
+  try {
+    await fs.symlink(source, target);
+    return "linked";
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    // EPERM on Windows NTFS when user lacks Admin or Developer Mode.
+    // ENOSYS on filesystems without symlink support.
+    if (code === "EPERM" || code === "ENOSYS") return "failed";
+    throw err;
+  }
+}
+
 async function ensureSymlink(target: string, source: string): Promise<void> {
   const existing = await fs.lstat(target).catch(() => null);
   if (!existing) {
     await ensureParentDir(target);
-    await fs.symlink(source, target);
+    const result = await trySymlink(target, source);
+    if (result === "failed") {
+      // Windows NTFS without admin/developer mode: copy instead. Loses auto-sync with the
+      // shared home but keeps per-company auth.json usable. Agent runs can still refresh
+      // by re-running prepareManagedCodexHome (e.g. on server restart).
+      await fs.copyFile(source, target);
+    }
     return;
   }
 
   if (!existing.isSymbolicLink()) {
+    // Already a regular file (probably from a prior copy fallback). Leave it alone; a
+    // restart will re-evaluate. Copying again without explicit invalidation could clobber
+    // edits the user made to the managed home.
     return;
   }
 
@@ -61,7 +83,10 @@ async function ensureSymlink(target: string, source: string): Promise<void> {
   if (resolvedLinkedPath === source) return;
 
   await fs.unlink(target);
-  await fs.symlink(source, target);
+  const result = await trySymlink(target, source);
+  if (result === "failed") {
+    await fs.copyFile(source, target);
+  }
 }
 
 async function ensureCopiedFile(target: string, source: string): Promise<void> {

@@ -145,6 +145,10 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
   );
   const command = asString(config.command, "gemini");
   const model = asString(config.model, DEFAULT_GEMINI_LOCAL_MODEL).trim();
+  const approvalMode = asString(
+    config.approvalMode,
+    asBoolean(config.yolo, false) ? "yolo" : "default",
+  ).trim();
   const sandbox = asBoolean(config.sandbox, false);
 
   const workspaceContext = parseObject(context.paperclipWorkspace);
@@ -275,7 +279,11 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
   }
   const commandNotes = (() => {
     const notes: string[] = ["Prompt is passed to Gemini via --prompt for non-interactive execution."];
-    notes.push("Added --approval-mode yolo for unattended execution.");
+    if (approvalMode && approvalMode !== "default") {
+      notes.push(`Added --approval-mode ${approvalMode} for unattended execution.`);
+    } else {
+      notes.push("Using the Gemini CLI default approval mode.");
+    }
     if (!instructionsFilePath) return notes;
     if (instructionsPrefix.length > 0) {
       notes.push(
@@ -333,7 +341,7 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
     const args = ["--output-format", "stream-json"];
     if (resumeSessionId) args.push("--resume", resumeSessionId);
     if (model && model !== DEFAULT_GEMINI_LOCAL_MODEL) args.push("--model", model);
-    args.push("--approval-mode", "yolo");
+    if (approvalMode && approvalMode !== "default") args.push("--approval-mode", approvalMode);
     if (sandbox) {
       args.push("--sandbox");
     } else {

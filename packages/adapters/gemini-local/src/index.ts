@@ -4,6 +4,7 @@ export const DEFAULT_GEMINI_LOCAL_MODEL = "auto";
 
 export const models = [
   { id: DEFAULT_GEMINI_LOCAL_MODEL, label: "Auto" },
+  { id: "gemini-3.1-pro", label: "Gemini 3.1 Pro" },
   { id: "gemini-2.5-pro", label: "Gemini 2.5 Pro" },
   { id: "gemini-2.5-flash", label: "Gemini 2.5 Flash" },
   { id: "gemini-2.5-flash-lite", label: "Gemini 2.5 Flash Lite" },
@@ -16,7 +17,7 @@ export const agentConfigurationDoc = `# gemini_local agent configuration
 Adapter: gemini_local
 
 Use when:
-- You want Paperclip to run the Gemini CLI locally on the host machine
+- You want Paperclip to run the official Gemini CLI locally on the host machine
 - You want Gemini chat sessions resumed across heartbeats with --resume
 - You want Paperclip skills injected locally without polluting the global environment
 
@@ -24,12 +25,14 @@ Don't use when:
 - You need webhook-style external invocation (use http or openclaw_gateway)
 - You only need a one-shot script without an AI coding agent loop (use process)
 - Gemini CLI is not installed on the machine that runs Paperclip
+- You only have the Antigravity editor/chat CLI installed; this adapter expects the official \`gemini\` command
 
 Core fields:
 - cwd (string, optional): default absolute working directory fallback for the agent process (created if missing when possible)
 - instructionsFilePath (string, optional): absolute path to a markdown instructions file prepended to the run prompt
 - promptTemplate (string, optional): run prompt template
 - model (string, optional): Gemini model id. Defaults to auto.
+- approvalMode (string, optional): Gemini CLI approval mode. Defaults to the CLI default. Set to "yolo" for unattended runs.
 - sandbox (boolean, optional): run in sandbox mode (default: false, passes --sandbox=none)
 - command (string, optional): defaults to "gemini"
 - extraArgs (string[], optional): additional CLI args
@@ -44,4 +47,5 @@ Notes:
 - Sessions resume with --resume when stored session cwd matches the current cwd.
 - Paperclip auto-injects local skills into \`~/.gemini/skills/\` via symlinks, so the CLI can discover both credentials and skills in their natural location.
 - Authentication can use GEMINI_API_KEY / GOOGLE_API_KEY or local Gemini CLI login.
+- This adapter targets the official Gemini CLI runtime. Antigravity remains a separate manual tool in ILM v1.
 `;

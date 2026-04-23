@@ -5,7 +5,7 @@ import path from "node:path";
 import { testEnvironment } from "@paperclipai/adapter-gemini-local/server";
 
 async function writeFakeGeminiCommand(binDir: string, argsCapturePath: string): Promise<string> {
-  const commandPath = path.join(binDir, "gemini");
+  const scriptPath = path.join(binDir, "gemini.js");
   const script = `#!/usr/bin/env node
 const fs = require("node:fs");
 const outPath = process.env.PAPERCLIP_TEST_ARGS_PATH;
@@ -22,13 +22,24 @@ console.log(JSON.stringify({
   result: "hello",
 }));
 `;
-  await fs.writeFile(commandPath, script, "utf8");
+  await fs.writeFile(scriptPath, script, "utf8");
+
+  if (process.platform === "win32") {
+    const commandPath = path.join(binDir, "gemini.cmd");
+    const wrapper = `@echo off\r\n"${process.execPath}" "%~dp0gemini.js" %*\r\n`;
+    await fs.writeFile(commandPath, wrapper, "utf8");
+    return commandPath;
+  }
+
+  const commandPath = path.join(binDir, "gemini");
+  const wrapper = `#!/usr/bin/env sh\nexec "${process.execPath}" "${scriptPath}" "$@"\n`;
+  await fs.writeFile(commandPath, wrapper, "utf8");
   await fs.chmod(commandPath, 0o755);
   return commandPath;
 }
 
 async function writeQuotaGeminiCommand(binDir: string): Promise<string> {
-  const commandPath = path.join(binDir, "gemini");
+  const scriptPath = path.join(binDir, "gemini.js");
   const script = `#!/usr/bin/env node
 if (process.argv.includes("--help")) {
   process.exit(0);
@@ -36,7 +47,18 @@ if (process.argv.includes("--help")) {
 console.error("429 RESOURCE_EXHAUSTED: You exceeded your current quota and billing details.");
 process.exit(1);
 `;
-  await fs.writeFile(commandPath, script, "utf8");
+  await fs.writeFile(scriptPath, script, "utf8");
+
+  if (process.platform === "win32") {
+    const commandPath = path.join(binDir, "gemini.cmd");
+    const wrapper = `@echo off\r\n"${process.execPath}" "%~dp0gemini.js" %*\r\n`;
+    await fs.writeFile(commandPath, wrapper, "utf8");
+    return commandPath;
+  }
+
+  const commandPath = path.join(binDir, "gemini");
+  const wrapper = `#!/usr/bin/env sh\nexec "${process.execPath}" "${scriptPath}" "$@"\n`;
+  await fs.writeFile(commandPath, wrapper, "utf8");
   await fs.chmod(commandPath, 0o755);
   return commandPath;
 }

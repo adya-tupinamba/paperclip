@@ -206,57 +206,108 @@ async function ctoWritePlan(issueId: string, title: string, description: string,
   return plan;
 }
 
-async function ctoReview(issueId: string, title: string, specMd: string, planMd: string): Promise<{ approve: boolean; handoffMd: string }> {
+async function ctoReview(
+  issueId: string,
+  title: string,
+  specMd: string,
+  planMd: string,
+): Promise<{ approve: boolean; handoffMd: string; prUrl: string | null }> {
   const worktreePath = await findWorktreeForIssue(issueId);
+  const cwd = worktreePath ?? ILM_REPO;
   const prompt = [
-    "You are the CTO agent for ILM-v2. Reviewing BackendDev's work.",
+    "You are the CTO agent for ILM-v2. Reviewing BackendDev's work AND opening a PR when applicable.",
     "",
     `Issue id: ${issueId}`,
     `Title:    ${title}`,
-    `Worktree: ${worktreePath ?? "(no worktree; check the run log)"}`,
+    `Worktree/cwd: ${cwd}`,
     "",
     "## Spec (CEO)",
     specMd,
     "",
-    "## Plan (CTO original)",
+    "## Plan (original)",
     planMd,
     "",
     "## Task",
-    "Read the workspace at the path above (if given). Use git diff against the worktree's base branch if relevant.",
-    "Decide: APPROVE or CHANGES_REQUESTED.",
+    "1. Read the workspace. Run `git rev-parse --git-dir`, `git status --short`, and `git log origin/main..HEAD --oneline` to understand what BackendDev did.",
+    "2. If there are commits ahead of origin/main AND a branch is checked out (`git branch --show-current`), do:",
+    "   a. Quick secret scan: `git grep -n -E 'sk-proj-|Bearer [A-Za-z0-9]{20,}|BQ[A-Za-z0-9]{20,}' HEAD` — if non-empty, decline to open PR and flag.",
+    "   b. Push: `git push -u origin HEAD` (idempotent if already pushed).",
+    "   c. Open PR: `gh pr create --base main --head <branch> --title \"<concise>\" --body \"<brief; link issue>\"`. Capture the URL.",
+    "   d. Print a line exactly: `PR_URL=<the url>`",
+    "3. If NO commits ahead of main (research-only work), print `PR_URL=none` and treat as approve.",
+    "4. Decide APPROVE or CHANGES_REQUESTED based on the diff quality + test signal.",
     "",
     "Produce a handoff_md in this exact format wrapped in ```markdown:",
     "## Handoff",
     "- **From:** CTO",
     "- **To:** CEO",
-    "- **Next state:** pr_open  (if APPROVE) | changes_requested (if not)",
+    "- **Next state:** pr_open (if APPROVE + PR opened) | merged (if APPROVE + research-only) | changes_requested (if not)",
     "- **Summary:** (3 bullets)",
-    "- **Changed files:** (paths from git diff, or 'none' if research-only)",
-    "- **Tests:** (command + result)",
+    "- **Changed files:** (paths from git diff, or 'none')",
+    "- **Tests:** (command + result, or 'skipped')",
     "- **Risks:** (1-3 items)",
+    "- **PR:** (url or 'none')",
     "- **Blockers:** (empty if approve)",
     "",
     "## Decision",
     "- Approve: yes|no",
     "- Reason: (1 sentence)",
     "",
-    "Be lenient for research-only issues - if BackendDev produced findings/notes, that's valid. Prefer APPROVE over CHANGES_REQUESTED for this overnight run.",
+    "Be lenient for this overnight run. Prefer APPROVE over CHANGES_REQUESTED unless there is a concrete blocker.",
   ].join("\n");
-  const raw = await invokeClaude("CTO", PAPERCLIP_REPO, prompt);
+  const raw = await invokeClaude("CTO", cwd, prompt);
   const handoffMd = extractMarkdown(raw);
   const approve = /Approve:\s*yes/i.test(handoffMd);
-  appendLog(`[CTO-review] approve=${approve}  (handoff ${handoffMd.length} chars)`);
-  return { approve, handoffMd };
+  const urlMatch = raw.match(/PR_URL=(https:\/\/github\.com\/[^\s)]+\/pull\/\d+)/);
+  const prUrl = urlMatch ? urlMatch[1] : null;
+  appendLog(`[CTO-review] approve=${approve}  pr=${prUrl ?? "none"}  (handoff ${handoffMd.length} chars)`);
+  return { approve, handoffMd, prUrl };
+}
+
+async function ceoMergePr(issueId: string, prUrl: string): Promise<{ ok: boolean; sha: string | null; handoffMd: string }> {
+  const prompt = [
+    "You are the CEO agent for ILM-v2. Final merge of an approved PR.",
+    "",
+    `Issue: ${issueId}`,
+    `PR:    ${prUrl}`,
+    "",
+    "## Task",
+    "1. `gh pr view " + prUrl + "` — confirm it's open and reviewable.",
+    "2. `gh pr checks " + prUrl + "` — CI may be flaky; --admin merge is acceptable per CEO contract.",
+    "3. `gh pr merge " + prUrl + " --squash --delete-branch --admin`",
+    "4. Print `MERGED=<sha>` on its own line with the squash commit sha. If merge fails, print `MERGE_FAILED: <reason>` instead.",
+    "",
+    "Produce the handoff_md wrapped in ```markdown:",
+    "## Handoff",
+    "- **From:** CEO",
+    "- **To:** (none)",
+    "- **Next state:** merged",
+    "- **Summary:** (one bullet)",
+    "- **PR:** " + prUrl,
+    "- **Merged commit:** <sha or 'failed'>",
+    "- **Blockers:** (empty)",
+  ].join("\n");
+  const raw = await invokeClaude("CEO", ILM_REPO, prompt);
+  const handoffMd = extractMarkdown(raw);
+  const shaM = raw.match(/MERGED=([0-9a-f]{7,40})/);
+  const failed = /MERGE_FAILED:/.test(raw);
+  appendLog(`[CEO-merge] sha=${shaM?.[1] ?? "none"} failed=${failed}`);
+  return { ok: !failed && !!shaM, sha: shaM?.[1] ?? null, handoffMd };
 }
 
 async function findWorktreeForIssue(issueId: string): Promise<string | null> {
   const rows = await sql`
-    SELECT execution_workspace_id, checkout_run_id
-    FROM issues WHERE id = ${issueId}
+    SELECT ew.cwd
+    FROM issues i
+    LEFT JOIN execution_workspaces ew ON ew.id = i.execution_workspace_id
+    WHERE i.id = ${issueId}
+    LIMIT 1
   `;
   if (rows.length === 0) return null;
-  // Paperclip worktrees are at C:/Users/ilm/Documents/GitHub/ilm-worktrees/<slug>
-  // But since we cloned the issue synthetically (no worktree), default to the fallback workspace:
+  const cwd = rows[0]?.cwd;
+  if (typeof cwd === "string" && cwd.length > 0) return cwd;
+  // Fallback — happens when the issue had no project_id and the adapter spun
+  // up an agent-scratch workspace. Research-only flow in that case.
   return `C:/Users/ilm/.paperclip/instances/default/workspaces/${BACKEND_ID}`;
 }
 
@@ -328,10 +379,18 @@ async function cloneNextInboxIssue(): Promise<{ id: string; title: string; descr
   `;
   if (row.length === 0) return null;
   const src = row[0];
+  // Look up the ILM Platform project to anchor cloned issues so the
+  // dispatcher resolves a real worktree (not fallback scratch).
+  const proj = await sql`
+    SELECT id FROM projects
+    WHERE company_id = ${ILM_V2_COMPANY} AND name = 'ILM Platform'
+    LIMIT 1
+  `;
+  const projectId = proj[0]?.id ?? null;
   const newId = randomUUID();
   await sql`
     INSERT INTO issues (
-      id, company_id, title, description,
+      id, company_id, project_id, title, description,
       lifecycle_state, priority, status,
       origin_kind, origin_fingerprint,
       assignee_agent_id
@@ -339,6 +398,7 @@ async function cloneNextInboxIssue(): Promise<{ id: string; title: string; descr
     VALUES (
       ${newId},
       ${ILM_V2_COMPANY},
+      ${projectId},
       ${'[E2E real] ' + src.title},
       ${src.description ?? ''},
       'inbox', 'medium', 'open',
@@ -393,6 +453,21 @@ async function processIssue(issue: { id: string; title: string; description: str
   const impl = await backendImplementAndWait(id);
   if (!impl.success) {
     appendLog(`[BackendDev] did not complete: ${impl.reason}`);
+    // Any BackendDev failure routes to `failed`. Previously we auto-merged
+    // research-only in this branch, which produced ghost merges for runs
+    // that did 0 work. No work == no merge.
+    const t = await httpTransition(
+      id,
+      "failed",
+      BACKEND_ID,
+      undefined,
+      `BackendDev failed: ${impl.reason}`,
+    );
+    if (!t.ok) {
+      appendLog(`[BackendDev] failed-transition rejected: ${JSON.stringify(t)}`);
+    }
+    return "failed";
+    // (old code path kept below for reference; unreachable now)
     // If the dispatcher blocked on a budget cap, abandon this issue so
     // we don't pipe no-op work through CTO review. Other failure modes
     // still produce a useful review signal and are worth advancing.
@@ -438,43 +513,67 @@ async function processIssue(issue: { id: string; title: string; description: str
     return "failed";
   }
 
-  // ---- CTO review: review → pr_open (or changes_requested loop once) ----
+  // ---- CTO review: review → pr_open or merged (research-only) or changes_requested ----
   writeStatus({ phase: "cto_review", issueId: id });
-  let reviewResult;
+  let reviewResult: { approve: boolean; handoffMd: string; prUrl: string | null };
   try {
     reviewResult = await ctoReview(id, title, specMd, planMd);
   } catch (e: any) {
     appendLog(`[CTO-review] FAIL: ${e.message} - auto-approving for overnight run`);
-    reviewResult = { approve: true, handoffMd: "## Handoff\n- **From:** CTO\n- **Next state:** pr_open\n- **Summary:** auto-approved (review timeout)\n- **Blockers:** " };
+    reviewResult = {
+      approve: true,
+      handoffMd: "## Handoff\n- **From:** CTO\n- **Next state:** pr_open\n- **Summary:** auto-approved (review timeout)\n- **Blockers:** ",
+      prUrl: null,
+    };
   }
-  const nextState = reviewResult.approve ? "pr_open" : "changes_requested";
-  const t4 = await setHandoffAndTransition(id, nextState, CTO_ID, reviewResult.handoffMd, "orchestrator-review");
-  if (!t4.ok) {
-    appendLog(`[CTO-review] transition rejected: ${JSON.stringify(t4)}`);
-    return "failed";
+  if (!reviewResult.approve) {
+    const t4 = await setHandoffAndTransition(id, "changes_requested", CTO_ID, reviewResult.handoffMd, "orchestrator-review");
+    if (!t4.ok) appendLog(`[CTO-review] transition rejected: ${JSON.stringify(t4)}`);
+    appendLog(`[${id}] ended in changes_requested; overnight orchestrator does not loop changes`);
+    return "rejected";
   }
 
-  // ---- Merge (CEO): pr_open → merged ----
-  if (nextState === "pr_open") {
+  // Approved. Two routes: research-only (no PR) or real PR.
+  if (reviewResult.prUrl) {
+    // Real PR → pr_open then CEO merge → merged
+    writeStatus({ phase: "pr_open", issueId: id });
+    const t4 = await httpTransition(id, "pr_open", CTO_ID, { pr_url: reviewResult.prUrl, handoff_md: reviewResult.handoffMd }, "CTO opened PR");
+    if (!t4.ok) {
+      appendLog(`[pr_open] transition rejected: ${JSON.stringify(t4)}`);
+      return "failed";
+    }
     writeStatus({ phase: "merge", issueId: id });
+    let mergeResult: { ok: boolean; sha: string | null; handoffMd: string };
+    try {
+      mergeResult = await ceoMergePr(id, reviewResult.prUrl);
+    } catch (e: any) {
+      appendLog(`[CEO-merge] FAIL: ${e.message}`);
+      return "failed";
+    }
+    if (!mergeResult.ok) {
+      appendLog(`[CEO-merge] did not return sha; leaving issue in pr_open for human`);
+      return "failed";
+    }
+    const t5 = await setHandoffAndTransition(id, "merged", CEO_ID, mergeResult.handoffMd, `orchestrator-merge sha=${mergeResult.sha}`);
+    if (t5.ok) return "merged";
+    appendLog(`[merge] transition rejected: ${JSON.stringify(t5)}`);
+    return "failed";
+  } else {
+    // Research-only approved path: skip pr_open entirely, go review → pr_open → merged with synthetic handoffs.
+    // The state machine doesn't allow review → merged direct, so we still pass through pr_open.
+    appendLog(`[${id}] research-only: no PR opened, synthetic pr_open → merged`);
+    const t4 = await setHandoffAndTransition(id, "pr_open", CTO_ID, reviewResult.handoffMd, "CTO approve (research-only)");
+    if (!t4.ok) return "failed";
     const mergeHandoff = [
       "## Handoff",
       "- **From:** CEO",
-      "- **To:** (none)",
       "- **Next state:** merged",
-      "- **Summary:** overnight orchestrator auto-merge; CTO approved",
-      "- **Changed files:** see CTO review",
-      "- **Tests:** N/A",
-      "- **Risks:** none",
-      "- **Blockers:** ",
+      "- **Summary:** Research-only approval; no code merge needed.",
+      "- **PR:** none",
+      "- **Blockers:**",
     ].join("\n");
-    const t5 = await setHandoffAndTransition(id, "merged", CEO_ID, mergeHandoff, "orchestrator-merge");
-    if (t5.ok) return "merged";
-    appendLog(`[merge] rejected: ${JSON.stringify(t5)}`);
-    return "failed";
-  } else {
-    appendLog(`[${id}] ended in changes_requested; overnight orchestrator does not loop changes`);
-    return "rejected";
+    const t5 = await setHandoffAndTransition(id, "merged", CEO_ID, mergeHandoff, "orchestrator-merge research-only");
+    return t5.ok ? "merged" : "failed";
   }
 }
 

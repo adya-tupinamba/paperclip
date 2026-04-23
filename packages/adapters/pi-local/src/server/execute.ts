@@ -339,16 +339,62 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
     ];
   })();
 
+  // Windows CreateProcessW limits the full command line to ~32k UTF-16 code units.
+  // On ILM-sized contexts the system + user prompts can exceed that and the Pi spawn
+  // fails with "Linha de comando muito longa." Fall back to temp files in that case.
+  // Pi's --append-system-prompt accepts either inline text or a file path (doc: "Append
+  // text or file contents to the system prompt"), and messages can be referenced as
+  // "@path" in the positional slot (doc usage: "pi [options] [@files...] [messages...]").
+  // Threshold set aggressively low (4000 chars combined) because Windows CreateProcessW
+  // also accounts for every other arg + env vars — a combined prompt of 15k can still bust
+  // the 32k UTF-16 budget in practice. Better to eat the temp-file write on every run than
+  // fail with "Linha de comando muito longa.".
+  const WINDOWS_ARG_FALLBACK_THRESHOLD = 4000;
+  const totalInlinePromptSize = renderedSystemPromptExtension.length + userPrompt.length;
+  const useFilePromptFallback =
+    process.platform === "win32" && totalInlinePromptSize > WINDOWS_ARG_FALLBACK_THRESHOLD;
+
+  let systemPromptFile: string | null = null;
+  let userPromptFile: string | null = null;
+  const tempFilesToCleanup: string[] = [];
+
+  if (useFilePromptFallback) {
+    systemPromptFile = path.join(os.tmpdir(), `paperclip-pi-system-${runId}.md`);
+    userPromptFile = path.join(os.tmpdir(), `paperclip-pi-user-${runId}.md`);
+    try {
+      await fs.writeFile(systemPromptFile, renderedSystemPromptExtension, "utf8");
+      await fs.writeFile(userPromptFile, userPrompt, "utf8");
+      tempFilesToCleanup.push(systemPromptFile, userPromptFile);
+      await onLog(
+        "stdout",
+        `[paperclip] Windows CLI arg-limit workaround active: wrote system+user prompts to temp files ` +
+          `(total inline size would have been ${totalInlinePromptSize} chars).\n`,
+      );
+    } catch (err) {
+      const reason = err instanceof Error ? err.message : String(err);
+      await onLog(
+        "stdout",
+        `[paperclip] Warning: could not write temp prompt files for CLI fallback (${reason}); falling back to inline args.\n`,
+      );
+      systemPromptFile = null;
+      userPromptFile = null;
+    }
+  }
+
   const buildArgs = (sessionFile: string): string[] => {
     const args: string[] = [];
-    
+
     // Use JSON mode for structured output with print mode (non-interactive)
     args.push("--mode", "json");
     args.push("-p"); // Non-interactive mode: process prompt and exit
-    
+
     // Use --append-system-prompt to extend Pi's default system prompt
-    args.push("--append-system-prompt", renderedSystemPromptExtension);
-    
+    if (systemPromptFile) {
+      args.push("--append-system-prompt", systemPromptFile);
+    } else {
+      args.push("--append-system-prompt", renderedSystemPromptExtension);
+    }
+
     if (provider) args.push("--provider", provider);
     if (modelId) args.push("--model", modelId);
     if (thinking) args.push("--thinking", thinking);
@@ -360,9 +406,14 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
     args.push("--skill", PI_AGENT_SKILLS_DIR);
 
     if (extraArgs.length > 0) args.push(...extraArgs);
-    
+
     // Add the user prompt as the last argument
-    args.push(userPrompt);
+    if (userPromptFile) {
+      // Pi accepts @path for file-referenced messages
+      args.push(`@${userPromptFile}`);
+    } else {
+      args.push(userPrompt);
+    }
 
     return args;
   };
@@ -483,30 +534,40 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
     };
   };
 
-  const initial = await runAttempt(sessionPath);
-  const initialFailed =
-    !initial.proc.timedOut && ((initial.proc.exitCode ?? 0) !== 0 || initial.parsed.errors.length > 0);
-  
-  if (
-    canResumeSession &&
-    initialFailed &&
-    isPiUnknownSessionError(initial.proc.stdout, initial.rawStderr)
-  ) {
-    await onLog(
-      "stdout",
-      `[paperclip] Pi session "${runtimeSessionId}" is unavailable; retrying with a fresh session.\n`,
-    );
-    const newSessionPath = buildSessionPath(agent.id, new Date().toISOString());
-    try {
-      await fs.writeFile(newSessionPath, "", { flag: "wx" });
-    } catch (err) {
-      if ((err as NodeJS.ErrnoException).code !== "EEXIST") {
-        throw err;
-      }
+  const cleanupTempPromptFiles = async () => {
+    for (const f of tempFilesToCleanup) {
+      await fs.unlink(f).catch(() => {});
     }
-    const retry = await runAttempt(newSessionPath);
-    return toResult(retry, true);
-  }
+  };
 
-  return toResult(initial);
+  try {
+    const initial = await runAttempt(sessionPath);
+    const initialFailed =
+      !initial.proc.timedOut && ((initial.proc.exitCode ?? 0) !== 0 || initial.parsed.errors.length > 0);
+
+    if (
+      canResumeSession &&
+      initialFailed &&
+      isPiUnknownSessionError(initial.proc.stdout, initial.rawStderr)
+    ) {
+      await onLog(
+        "stdout",
+        `[paperclip] Pi session "${runtimeSessionId}" is unavailable; retrying with a fresh session.\n`,
+      );
+      const newSessionPath = buildSessionPath(agent.id, new Date().toISOString());
+      try {
+        await fs.writeFile(newSessionPath, "", { flag: "wx" });
+      } catch (err) {
+        if ((err as NodeJS.ErrnoException).code !== "EEXIST") {
+          throw err;
+        }
+      }
+      const retry = await runAttempt(newSessionPath);
+      return toResult(retry, true);
+    }
+
+    return toResult(initial);
+  } finally {
+    await cleanupTempPromptFiles();
+  }
 }

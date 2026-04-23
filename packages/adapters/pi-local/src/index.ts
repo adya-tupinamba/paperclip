@@ -37,4 +37,27 @@ Notes:
 - Sessions are stored in ~/.pi/paperclips/ and resumed with --session.
 - All tools (read, bash, edit, write, grep, find, ls) are enabled by default.
 - Agent instructions are appended to Pi's system prompt via --append-system-prompt, while the user task is sent via -p.
+- The \`thinking\` field is a native adapter_config property (not extraArgs) and is passed to Pi as \`--thinking <level>\` by the adapter.
+
+# Specialist lanes (deep reasoning via Pi)
+# ILM v1 uses a mixed specialist lane to get independent coverage:
+#
+# - Gemini lane (architecture + ingestion):
+#   model: google/gemini-3.1-pro-preview
+#   thinking: high
+#   Use for CTO, DataEngineer - deep reasoning, long context, triage, cross-repo synthesis.
+#   Requires GEMINI_API_KEY in env.
+#
+# - GLM lane (audit + security):
+#   model: zai/glm-5.1
+#   thinking: high
+#   Use for SecurityAuditor - independent judge on RLS/auth/data-isolation reviews.
+#   Deliberately different model family from CTO/DataEngineer so the auditor is not the
+#   same brain as the architect. Requires ZAI_API_KEY in env.
+#
+# Alternative providers/models available via Pi (2026-04-22):
+# - ZAI: zai/glm-5-turbo (latency-tuned, swap in if audit queue grows),
+#        zai/glm-5v-turbo (multimodal, for screenshot/image audits when needed).
+# - Google: google/gemini-3.1-pro-preview-customtools (specialized tool-use variant).
+# Use \`pi --list-models\` on the host to confirm availability before configuring an agent.
 `;
