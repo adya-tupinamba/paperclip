@@ -35,6 +35,7 @@ import {
   reconcilePersistedRuntimeServicesOnStartup,
   routineService,
 } from "./services/index.js";
+import { isFeatureIlmV2Enabled } from "@paperclipai/shared/feature-flags";
 import { createFeedbackTraceShareClientFromConfig } from "./services/feedback-share-client.js";
 import { createStorageServiceFromConfig } from "./storage/index.js";
 import { printStartupBanner } from "./startup-banner.js";
@@ -655,10 +656,14 @@ export async function startServer(): Promise<StartedServer> {
       logger.error({ err }, "startup reconciliation of persisted runtime services failed");
     });
   
-  if (config.heartbeatSchedulerEnabled) {
+  // ILM-v2: when the feature flag is on, the old per-agent 30s tick loop is
+  // replaced by an event-driven dispatcher + 5-minute watchdog. Gate the
+  // entire legacy scheduler block behind `!isFeatureIlmV2Enabled()` so the
+  // old loop does not run concurrently with the new pipeline.
+  if (config.heartbeatSchedulerEnabled && !isFeatureIlmV2Enabled()) {
     const heartbeat = heartbeatService(db as any);
     const routines = routineService(db as any);
-  
+
     // Reap orphaned running runs at startup while in-memory execution state is empty,
     // then resume any persisted queued runs that were waiting on the previous process.
     void heartbeat

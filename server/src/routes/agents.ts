@@ -76,6 +76,7 @@ import {
   resolveDefaultAgentInstructionsBundleRole,
 } from "../services/default-agent-instructions.js";
 import { getTelemetryClient } from "../telemetry.js";
+import { isFeatureIlmV2Enabled } from "@paperclipai/shared/feature-flags";
 
 const RUN_LOG_DEFAULT_LIMIT_BYTES = 256_000;
 const RUN_LOG_MAX_LIMIT_BYTES = 1024 * 1024;
@@ -2297,6 +2298,17 @@ export function agentRoutes(db: Db) {
   });
 
   router.post("/agents/:id/wakeup", validate(wakeAgentSchema), async (req, res) => {
+    // ILM-v2: when the feature flag is on, every wake MUST carry an
+    // explicit issueId in payload. The old 30s poll loop used to wake
+    // agents with no issue context; that path is forbidden under v2 so
+    // the dispatcher remains the single point of agent dispatch.
+    if (isFeatureIlmV2Enabled() && !req.body?.payload?.issueId) {
+      res.status(400).json({
+        error: "payload.issueId required under PAPERCLIP_FEATURE_ILM_V2",
+      });
+      return;
+    }
+
     const id = req.params.id as string;
     const agent = await svc.getById(id);
     if (!agent) {
