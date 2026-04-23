@@ -111,8 +111,10 @@ function buildMockDb(fx: Fixtures): DispatcherDb {
         };
       }
 
-      // Budget guard aggregations on heartbeat_runs
-      if (s.includes('FROM heartbeat_runs') && s.includes("SUM((usage_json->'cost'->>'total')")) {
+      // Budget guard aggregations on heartbeat_runs (matches both the
+      // legacy `usage_json->'cost'->>'total'` path and the current canonical
+      // `usage_json->>'costUsd'` path wrapped in a COALESCE).
+      if (s.includes('FROM heartbeat_runs') && /SUM\(/.test(s) && s.includes('usage_json')) {
         let total = 0;
         const now = Date.now();
         const startOfDay = new Date(now - (now % (24 * 60 * 60 * 1000)));

@@ -1,8 +1,10 @@
 /**
  * Budget guard — ILM-v2 Phase 3 Task 3.2.
  *
- * Aggregates agent spend from `heartbeat_runs.usage_json.cost.total` and
- * returns `{ok: false}` when any of four tiers are exceeded:
+ * Aggregates agent spend from `heartbeat_runs.usage_json.costUsd` (the
+ * canonical flat key written by every adapter — codex-local, claude-local,
+ * pi-local, cursor-local, gemini-local) and returns `{ok: false}` when any
+ * of four tiers are exceeded:
  *   - per_agent_daily  ($5.00 / America/Sao_Paulo day / agent)
  *   - per_agent_hourly ($1.00 / rolling hour / agent)
  *   - per_issue_total  ($2.00 total across an issue's lifetime)
@@ -101,7 +103,15 @@ async function sumCost(
   where: string,
   params: unknown[],
 ): Promise<number> {
-  const sql = `SELECT COALESCE(SUM((usage_json->'cost'->>'total')::numeric), 0) AS total
+  // Prefer the canonical `costUsd` key; fall back to the legacy nested
+  // `cost.total` path so pre-existing budget-adjustment rows still offset
+  // the running total after this fix lands.
+  const sql = `SELECT COALESCE(SUM((
+                 COALESCE(
+                   usage_json->>'costUsd',
+                   usage_json->'cost'->>'total'
+                 )
+               )::numeric), 0) AS total
                FROM heartbeat_runs ${where}`;
   const r = await db.query<{ total: string | number | null }>(sql, params);
   const raw = r.rows[0]?.total ?? 0;

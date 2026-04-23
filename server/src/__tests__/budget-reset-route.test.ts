@@ -101,7 +101,7 @@ describe("POST /api/budget/reset", () => {
       adjustment: true,
       adjustment_scope: "per_agent_daily",
       reason: "refund",
-      cost: { total: -999 },
+      costUsd: -999,
     });
   });
 

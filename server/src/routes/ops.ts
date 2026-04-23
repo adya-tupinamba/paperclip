@@ -43,7 +43,12 @@ export function opsRoutes(db: Db, deps: OpsDeps = {}) {
            WHERE r.agent_id = a.id AND r.status = 'running'
            ORDER BY r.started_at DESC NULLS LAST LIMIT 1) AS active_run_id,
         COALESCE((
-          SELECT SUM((usage_json->'cost'->>'total')::numeric)
+          SELECT SUM((
+            COALESCE(
+              usage_json->>'costUsd',
+              usage_json->'cost'->>'total'
+            )
+          )::numeric)
           FROM heartbeat_runs
           WHERE agent_id = a.id
             AND started_at >= date_trunc('day', now() AT TIME ZONE 'America/Sao_Paulo')
@@ -88,7 +93,12 @@ export function opsRoutes(db: Db, deps: OpsDeps = {}) {
         AND created_at >= date_trunc('day', now() AT TIME ZONE 'America/Sao_Paulo')
     `);
     const spend = await query(`
-      SELECT COALESCE(SUM((usage_json->'cost'->>'total')::numeric), 0) AS total
+      SELECT COALESCE(SUM((
+        COALESCE(
+          usage_json->>'costUsd',
+          usage_json->'cost'->>'total'
+        )
+      )::numeric), 0) AS total
       FROM heartbeat_runs
       WHERE started_at >= date_trunc('day', now() AT TIME ZONE 'America/Sao_Paulo')
     `);

@@ -6,13 +6,12 @@
  * Gated by the `X-Paperclip-Human-Token` header matching
  * `process.env.PAPERCLIP_HUMAN_TOKEN`. Inserts a synthetic negative-cost
  * row into `heartbeat_runs` so the budget-guard aggregation (which SUMs
- * `usage_json->'cost'->>'total'`) subtracts the delta on subsequent
- * checks.
+ * `usage_json->>'costUsd'`) subtracts the delta on subsequent checks.
  *
  * The row carries:
  *   - `status = 'budget_adjustment'`  (no CHECK constraint on this column,
  *     so the value is accepted verbatim)
- *   - `usage_json = { cost: { total: -999 }, adjustment: true, ... }`
+ *   - `usage_json = { costUsd: -999, adjustment: true, ... }`
  *
  * Required fields on `heartbeat_runs` we satisfy:
  *   - `agent_id`      supplied by the caller as `target_agent_id`
@@ -111,7 +110,7 @@ export function budgetResetRoutes(db: Db, deps: BudgetResetDeps = {}) {
       adjustment: true,
       adjustment_scope: body.scope,
       reason: body.reason,
-      cost: { total: delta },
+      costUsd: delta,
     };
     if (body.scope === "per_issue_total" && body.target_id) {
       usageJson.issue_id = body.target_id;
